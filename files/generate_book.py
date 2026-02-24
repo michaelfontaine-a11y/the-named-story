@@ -9,9 +9,8 @@ Usage:
 
 Image Setup:
     Put illustrations in: ./images/{variant}/
-    Files: cover.jpg, scene-01.jpg through scene-12.jpg
-    Resolution: 3300x2400px (300 DPI at 11x8")
-    Format: JPEG at 95% quality (converted from PNG for file size)
+    Files: cover.png, scene-01.png through scene-12.png
+    Resolution: 3000x2400px (300 DPI at 10x8")
 """
 
 import os
@@ -26,7 +25,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 # ============================================================
 # PAGE DIMENSIONS (match Gelato product spec)
 # ============================================================
-PAGE_W = 11 * inch
+PAGE_W = 10 * inch
 PAGE_H = 8 * inch
 
 
@@ -141,7 +140,7 @@ def pg_image(c, path):
         c.setFont("Helvetica", 11)
         c.drawCentredString(PAGE_W / 2, PAGE_H / 2 + 8, f"[ {os.path.basename(path)} ]")
         c.setFont("Helvetica", 9)
-        c.drawCentredString(PAGE_W / 2, PAGE_H / 2 - 8, "3300\u00d72400px JPG @ 300 DPI")
+        c.drawCentredString(PAGE_W / 2, PAGE_H / 2 - 8, "3000\u00d72400px PNG @ 300 DPI")
 
 
 def pg_cover(c, data, img_path):
@@ -291,7 +290,7 @@ def build_book(name, gifter, variant):
 
     pages = [
         # --- PAGE 1: Cover ---
-        ("cover", img("cover.jpg"), {
+        ("cover", img("cover.png"), {
             "t1": f"{name} and the",
             "t2": "First Easter",
             "sub": "A Named Story Book",
@@ -311,7 +310,7 @@ def build_book(name, gifter, variant):
         ]),
 
         # --- PAGE 4: Illustration — Road to Jerusalem ---
-        ("image", img("scene-01.jpg")),
+        ("image", img("scene-01.png")),
 
         # --- PAGE 5: Text — Spread 1 ---
         ("text", [
@@ -322,7 +321,7 @@ def build_book(name, gifter, variant):
         ]),
 
         # --- PAGE 6: Illustration — Palm Sunday ---
-        ("image", img("scene-02.jpg")),
+        ("image", img("scene-02.png")),
 
         # --- PAGE 7: Text — Spread 2 ---
         ("text", [
@@ -334,7 +333,7 @@ def build_book(name, gifter, variant):
         ]),
 
         # --- PAGE 8: Illustration — Seeing Jesus through crowd ---
-        ("image", img("scene-03.jpg")),
+        ("image", img("scene-03.png")),
 
         # --- PAGE 9: Text — Spread 3 ---
         ("text", [
@@ -346,7 +345,7 @@ def build_book(name, gifter, variant):
         ]),
 
         # --- PAGE 10: Illustration — Jesus kneels to child ---
-        ("image", img("scene-04.jpg")),
+        ("image", img("scene-04.png")),
 
         # --- PAGE 11: Text — Spread 4 ---
         ("text", [
@@ -357,7 +356,7 @@ def build_book(name, gifter, variant):
         ]),
 
         # --- PAGE 12: Illustration — Last Supper ---
-        ("image", img("scene-05.jpg")),
+        ("image", img("scene-05.png")),
 
         # --- PAGE 13: Text — Spread 5 ---
         ("text", [
@@ -370,7 +369,7 @@ def build_book(name, gifter, variant):
         ]),
 
         # --- PAGE 14: Illustration — Gethsemane ---
-        ("image", img("scene-06.jpg")),
+        ("image", img("scene-06.png")),
 
         # --- PAGE 15: Text — Spread 6 ---
         ("text", [
@@ -382,7 +381,7 @@ def build_book(name, gifter, variant):
         ]),
 
         # --- PAGE 16: Illustration — Jesus taken away ---
-        ("image", img("scene-07.jpg")),
+        ("image", img("scene-07.png")),
 
         # --- PAGE 17: Text — Spread 7 ---
         ("text", [
@@ -394,7 +393,7 @@ def build_book(name, gifter, variant):
         ]),
 
         # --- PAGE 18: Illustration — Mary holds the child ---
-        ("image", img("scene-08.jpg")),
+        ("image", img("scene-08.png")),
 
         # --- PAGE 19: Text — Spread 8 ---
         ("text", [
@@ -408,7 +407,7 @@ def build_book(name, gifter, variant):
         ]),
 
         # --- PAGE 20: Illustration — Holy Saturday / child alone ---
-        ("image", img("scene-09.jpg")),
+        ("image", img("scene-09.png")),
 
         # --- PAGE 21: Text — Spread 9 ---
         ("text", [
@@ -421,7 +420,7 @@ def build_book(name, gifter, variant):
         ]),
 
         # --- PAGE 22: Illustration — Easter dawn ---
-        ("image", img("scene-10.jpg")),
+        ("image", img("scene-10.png")),
 
         # --- PAGE 23: Text — Spread 10 ---
         ("text", [
@@ -433,7 +432,7 @@ def build_book(name, gifter, variant):
         ]),
 
         # --- PAGE 24: Illustration — Running to empty tomb ---
-        ("image", img("scene-11.jpg")),
+        ("image", img("scene-11.png")),
 
         # --- PAGE 25: Text — Spread 11 ---
         ("text", [
@@ -445,7 +444,7 @@ def build_book(name, gifter, variant):
         ]),
 
         # --- PAGE 26: Illustration — Jesus lifts child in garden ---
-        ("image", img("scene-12.jpg")),
+        ("image", img("scene-12.png")),
 
         # --- PAGE 27: Text — Spread 12 (THE FINALE) ---
         ("finale", [
@@ -456,7 +455,7 @@ def build_book(name, gifter, variant):
             "",
             f"\u201cSee, {name}?\nI did this for you.\nBecause I love you.\nI have always loved you.\nAnd nothing \u2014 not nails, not a tomb, not even death itself \u2014\ncould keep me from coming back to you.\u201d",
             f"And {name} held on tight and whispered back:\n\u201cThank You Jesus. I love you!\u201d",
-        ], img("scene-12.jpg")),
+        ], img("scene-12.png")),
 
         # --- PAGE 28: Promo ---
         ("promo", [
