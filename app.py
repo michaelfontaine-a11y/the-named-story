@@ -38,16 +38,18 @@ R2_SECRET_KEY = os.environ.get("CLOUDFLARE_SECRET_KEY", "")
 R2_BUCKET     = os.environ.get("R2_BUCKET_NAME", "named-story-pdfs")
 R2_PUBLIC_URL = os.environ.get("R2_PUBLIC_URL", "")  # e.g. https://pub-xxxxx.r2.dev
 
-# Valid character variants (8 total)
+# Valid character variants (10 total) — matches website codes B1-B5, G1-G5
 VALID_VARIANTS = [
-    "boy-light-light",
-    "boy-medium-brown",
-    "boy-dark-dark",
-    "boy-dark-brown",
-    "girl-light-light",
-    "girl-medium-brown",
-    "girl-dark-dark",
-    "girl-dark-brown",
+    "boy-fair-blonde",     # B1
+    "boy-fair-red",        # B2
+    "boy-olive-dark",      # B3
+    "boy-tan-dark",        # B4
+    "boy-deep-dark",       # B5
+    "girl-fair-blonde",    # G1
+    "girl-fair-red",       # G2
+    "girl-olive-dark",     # G3
+    "girl-tan-dark",       # G4
+    "girl-deep-dark",      # G5
 ]
 
 
@@ -70,9 +72,7 @@ def upload_to_r2(local_path, filename):
     client = get_r2_client()
     key = f"books/{filename}"
     client.upload_file(
-        local_path,
-        R2_BUCKET,
-        key,
+        local_path, R2_BUCKET, key,
         ExtraArgs={"ContentType": "application/pdf"},
     )
     return f"{R2_PUBLIC_URL}/{key}"
@@ -92,7 +92,6 @@ def check_auth():
 # ============================================================
 # ROUTES
 # ============================================================
-
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "service": "the-named-story-generator"})
@@ -106,8 +105,8 @@ def generate():
     Expected JSON body:
     {
         "name": "Dominic",
-        "gifter": "Grandma & Grandpa",     (optional, default "")
-        "variant": "boy-dark-brown"
+        "gifter": "Grandma & Grandpa",   (optional, default "")
+        "variant": "boy-fair-blonde"
     }
 
     Returns:
@@ -115,7 +114,7 @@ def generate():
         "status": "success",
         "pdf_url": "https://pub-xxxxx.r2.dev/books/abc123.pdf",
         "name": "Dominic",
-        "variant": "boy-dark-brown",
+        "variant": "boy-fair-blonde",
         "pages": 30
     }
     """
@@ -128,8 +127,8 @@ def generate():
     if not data:
         return jsonify({"status": "error", "message": "JSON body required"}), 400
 
-    name = data.get("name", "").strip()
-    gifter = data.get("gifter", "").strip()
+    name    = data.get("name", "").strip()
+    gifter  = data.get("gifter", "").strip()
     variant = data.get("variant", "").strip()
 
     # Validate
@@ -140,9 +139,8 @@ def generate():
     if len(name) > 20:
         return jsonify({"status": "error", "message": "name must be 20 characters or less"}), 400
 
-    # Note: if you want strict variant validation, uncomment below:
-    # if variant not in VALID_VARIANTS:
-    #     return jsonify({"status": "error", "message": f"Invalid variant. Must be one of: {VALID_VARIANTS}"}), 400
+    if variant not in VALID_VARIANTS:
+        return jsonify({"status": "error", "message": f"Invalid variant. Must be one of: {VALID_VARIANTS}"}), 400
 
     # Generate PDF
     try:
