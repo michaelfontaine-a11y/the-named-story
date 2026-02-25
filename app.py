@@ -1,10 +1,10 @@
 """
 The Named Story — Flask API Server
 ====================================
-Wraps generate_book.py as a web API that Make.com can call.
+Wraps generate_book.py and generate_cover.py as a web API that Make.com can call.
 
 Endpoints:
-    POST /generate  — Generate a personalized book PDF
+    POST /generate  — Generate a personalized book PDF + cover wrap PDF
     GET  /health    — Health check
 
 Environment Variables:
@@ -16,6 +16,8 @@ Environment Variables:
     IMAGES_BASE            — Path to images directory (default: ./images)
     FONTS_DIR              — Path to fonts directory (default: ./fonts)
     API_SECRET             — Simple auth token to protect your endpoint
+    GELATO_API_KEY         — (Optional) Gelato API key for fetching exact cover dimensions
+    GELATO_PRODUCT_UID     — (Optional) Gelato product UID for cover dimensions
 """
 
 import os
@@ -24,6 +26,7 @@ import tempfile
 import boto3
 from flask import Flask, request, jsonify
 from generate_book import generate_book
+from generate_cover import generate_cover
 
 app = Flask(__name__)
 
@@ -37,6 +40,10 @@ R2_ACCESS_KEY = os.environ.get("CLOUDFLARE_ACCESS_KEY", "")
 R2_SECRET_KEY = os.environ.get("CLOUDFLARE_SECRET_KEY", "")
 R2_BUCKET     = os.environ.get("R2_BUCKET_NAME", "named-story-pdfs")
 R2_PUBLIC_URL = os.environ.get("R2_PUBLIC_URL", "")  # e.g. https://pub-xxxxx.r2.dev
+
+GELATO_API_KEY   = os.environ.get("GELATO_API_KEY", "")
+GELATO_PRODUCT   = os.environ.get("GELATO_PRODUCT_UID",
+    "photobooks-hardcover_pf_210x280-mm-8x11-inch_pt_170-gsm-65lb-coated-silk_cl_4-4_ccl_4-4_bt_glued-left_ct_matt-lamination_prt_1-0_cpt_130-gsm-65-lb-cover-coated-silk_hor")
 
 # Valid character variants (10 total) — matches website codes B1-B5, G1-G5
 VALID_VARIANTS = [
@@ -100,7 +107,7 @@ def health():
 @app.route("/generate", methods=["POST"])
 def generate():
     """
-    Generate a personalized book PDF.
+    Generate a personalized book PDF and cover wrap PDF.
 
     Expected JSON body:
     {
@@ -113,6 +120,7 @@ def generate():
     {
         "status": "success",
         "pdf_url": "https://pub-xxxxx.r2.dev/books/abc123.pdf",
+        "cover_url": "https://pub-xxxxx.r2.dev/books/abc123-cover.pdf",
         "name": "Dominic",
         "variant": "boy-fair-blonde",
         "pages": 30
@@ -142,23 +150,38 @@ def generate():
     if variant not in VALID_VARIANTS:
         return jsonify({"status": "error", "message": f"Invalid variant. Must be one of: {VALID_VARIANTS}"}), 400
 
-    # Generate PDF
+    # Generate both PDFs
     try:
         order_id = uuid.uuid4().hex[:12]
-        filename = f"{name.lower().replace(' ', '-')}-{variant}-{order_id}.pdf"
-        tmp_path = os.path.join(tempfile.gettempdir(), filename)
+        base_name = f"{name.lower().replace(' ', '-')}-{variant}-{order_id}"
 
-        generate_book(name, gifter, variant, tmp_path)
+        # Interior pages
+        interior_filename = f"{base_name}.pdf"
+        interior_path = os.path.join(tempfile.gettempdir(), interior_filename)
+        generate_book(name, gifter, variant, interior_path)
 
-        # Upload to R2
-        pdf_url = upload_to_r2(tmp_path, filename)
+        # Cover wrap
+        cover_filename = f"{base_name}-cover.pdf"
+        cover_path = os.path.join(tempfile.gettempdir(), cover_filename)
+        generate_cover(
+            name, variant, cover_path,
+            gelato_api_key=GELATO_API_KEY if GELATO_API_KEY else None,
+            product_uid=GELATO_PRODUCT if GELATO_API_KEY else None,
+            page_count=30
+        )
 
-        # Clean up temp file
-        os.remove(tmp_path)
+        # Upload both to R2
+        pdf_url = upload_to_r2(interior_path, interior_filename)
+        cover_url = upload_to_r2(cover_path, cover_filename)
+
+        # Clean up temp files
+        os.remove(interior_path)
+        os.remove(cover_path)
 
         return jsonify({
             "status": "success",
             "pdf_url": pdf_url,
+            "cover_url": cover_url,
             "name": name,
             "variant": variant,
             "pages": 30,
