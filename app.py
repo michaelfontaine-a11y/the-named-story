@@ -13,7 +13,6 @@ Environment Variables:
     CLOUDFLARE_SECRET_KEY  - R2 secret access key
     R2_BUCKET_NAME         - Your R2 bucket name (e.g. 'named-story-pdfs')
     R2_PUBLIC_URL          - Public URL for your R2 bucket (e.g. 'https://pub-xxxxx.r2.dev')
-    IMAGES_BASE            - Path to images directory (default: ./images)
     FONTS_DIR              - Path to fonts directory (default: ./fonts)
     API_SECRET             - Simple auth token to protect your endpoint
     GELATO_API_KEY         - (Optional) Gelato API key for fetching exact cover dimensions
@@ -23,6 +22,7 @@ Environment Variables:
 import os
 import uuid
 import tempfile
+import shutil
 import boto3
 from flask import Flask, request, jsonify
 from generate_book import generate_book
@@ -45,6 +45,9 @@ GELATO_API_KEY   = os.environ.get("GELATO_API_KEY", "")
 GELATO_PRODUCT   = os.environ.get("GELATO_PRODUCT_UID",
     "photobooks-hardcover_pf_210x280-mm-8x11-inch_pt_170-gsm-65lb-coated-silk_cl_4-4_ccl_4-4_bt_glued-left_ct_matt-lamination_prt_1-0_cpt_130-gsm-65-lb-cover-coated-silk_hor")
 
+# Local path where we cache downloaded images from R2
+IMAGES_LOCAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
+
 # Valid character variants (10 total) - matches website codes B1-B5, G1-G5
 VALID_VARIANTS = [
     "boy-fair-blonde",     # B1
@@ -59,9 +62,12 @@ VALID_VARIANTS = [
     "girl-deep-dark",      # G5
 ]
 
+# List of required image files per variant
+REQUIRED_IMAGES = ["cover.jpg"] + [f"scene-{i:02d}.jpg" for i in range(1, 13)]
+
 
 # ============================================================
-# R2 UPLOAD
+# R2 CLIENT
 # ============================================================
 def get_r2_client():
     """Create an S3-compatible client for Cloudflare R2."""
@@ -74,6 +80,9 @@ def get_r2_client():
     )
 
 
+# ============================================================
+# R2 UPLOAD (for generated PDFs)
+# ============================================================
 def upload_to_r2(local_path, filename):
     """Upload a file to R2 and return the public URL."""
     client = get_r2_client()
@@ -83,6 +92,58 @@ def upload_to_r2(local_path, filename):
         ExtraArgs={"ContentType": "application/pdf"},
     )
     return f"{R2_PUBLIC_URL}/{key}"
+
+
+# ============================================================
+# R2 DOWNLOAD (for illustration images)
+# ============================================================
+def download_variant_images(variant):
+    """
+    Download all images for a variant from R2 to local filesystem.
+    Images are cached - if they already exist locally, skip download.
+    Returns the local variant directory path.
+    """
+    variant_dir = os.path.join(IMAGES_LOCAL, variant)
+    os.makedirs(variant_dir, exist_ok=True)
+
+    # Check if all images already exist locally (cached from previous request)
+    all_exist = all(
+        os.path.exists(os.path.join(variant_dir, img))
+        for img in REQUIRED_IMAGES
+    )
+    if all_exist:
+        print(f"  Images for {variant} already cached locally")
+        return variant_dir
+
+    # Download from R2
+    print(f"  Downloading images for {variant} from R2...")
+    client = get_r2_client()
+    downloaded = 0
+
+    for img_name in REQUIRED_IMAGES:
+        local_path = os.path.join(variant_dir, img_name)
+        r2_key = f"images/{variant}/{img_name}"
+
+        if os.path.exists(local_path):
+            downloaded += 1
+            continue
+
+        try:
+            client.download_file(R2_BUCKET, r2_key, local_path)
+            downloaded += 1
+        except Exception as e:
+            print(f"  WARNING: Failed to download {r2_key}: {e}")
+            if os.path.exists(local_path):
+                os.remove(local_path)
+
+    print(f"  Downloaded {downloaded}/{len(REQUIRED_IMAGES)} images for {variant}")
+
+    # Verify all required images are now present
+    missing = [img for img in REQUIRED_IMAGES if not os.path.exists(os.path.join(variant_dir, img))]
+    if missing:
+        raise FileNotFoundError(f"Missing images for {variant} after download: {', '.join(missing)}")
+
+    return variant_dir
 
 
 # ============================================================
@@ -139,28 +200,30 @@ def generate():
     gifter  = data.get("gifter", "").strip()
     variant = data.get("variant", "").strip()
 
-    # Validate
+    # Validate inputs
     if not name:
         return jsonify({"status": "error", "message": "name is required"}), 400
     if not variant:
         return jsonify({"status": "error", "message": "variant is required"}), 400
     if len(name) > 20:
         return jsonify({"status": "error", "message": "name must be 20 characters or less"}), 400
-
     if variant not in VALID_VARIANTS:
         return jsonify({"status": "error", "message": f"Invalid variant. Must be one of: {VALID_VARIANTS}"}), 400
 
     # Generate both PDFs
     try:
+        # Step 1: Download images from R2 (cached if already present)
+        download_variant_images(variant)
+
+        # Step 2: Generate interior PDF
         order_id = uuid.uuid4().hex[:12]
         base_name = f"{name.lower().replace(' ', '-')}-{variant}-{order_id}"
 
-        # Interior pages
         interior_filename = f"{base_name}.pdf"
         interior_path = os.path.join(tempfile.gettempdir(), interior_filename)
         generate_book(name, gifter, variant, interior_path)
 
-        # Cover wrap
+        # Step 3: Generate cover wrap PDF
         cover_filename = f"{base_name}-cover.pdf"
         cover_path = os.path.join(tempfile.gettempdir(), cover_filename)
         generate_cover(
@@ -170,11 +233,11 @@ def generate():
             page_count=30
         )
 
-        # Upload both to R2
+        # Step 4: Upload both PDFs to R2
         pdf_url = upload_to_r2(interior_path, interior_filename)
         cover_url = upload_to_r2(cover_path, cover_filename)
 
-        # Clean up temp files
+        # Clean up temp PDF files
         for path in [interior_path, cover_path]:
             try:
                 os.remove(path)
@@ -190,7 +253,12 @@ def generate():
             "pages": 30,
         })
 
+    except FileNotFoundError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
