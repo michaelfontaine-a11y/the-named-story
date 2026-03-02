@@ -452,10 +452,11 @@ def build_book(name, gifter, variant):
             "And there \u2014 standing in the morning light like He had all the time in the world, like death was just a place He had visited and decided not to stay \u2014",
             "was Jesus.",
             f"Alive. Smiling. Real as the ground beneath {name}\u2019s feet.",
-            f"{He} opened His arms, and {name} didn\u2019t walk. {He} ran.",
+            f"{He} opened His arms, and {name} didn\u2019t walk. {He} ran. {He} crashed into Him the way waves crash into the shore \u2014 not carefully, not gently, but with everything {he} had.",
+            f"And Jesus picked {him} up and held {him} high and laughed \u2014 the kind of laugh that makes flowers bloom and birds take flight and broken things become whole.",
             "",
             f"\u201cSee, {name}?\nI did this for you.\nBecause I love you.\nI have always loved you.\nAnd nothing \u2014 not nails, not a tomb, not even death itself \u2014\ncould keep me from coming back to you.\u201d",
-            f"And {name} held on tight and whispered back:\n\u201cThank You Jesus. I love you!\u201d",
+            f"And {name} held on tight and whispered back:\n\u201cThank You Jesus. I love you too!\u201d",
         ], img("scene-12.jpg")),
 
         # --- PAGE 28: Promo ---
@@ -505,7 +506,7 @@ def generate_book(name, gifter, variant, output):
         elif ptype == "text":
             pg_text(c, entry[1])
         elif ptype == "finale":
-            pg_finale(c, entry[2], entry[1])
+            pg_finale(c, entry[1], entry[2])
         elif ptype == "promo":
             pg_promo(c, entry[1])
         elif ptype == "copyright":
