@@ -25,6 +25,7 @@ import tempfile
 import shutil
 import boto3
 from flask import Flask, request, jsonify
+from PyPDF2 import PdfReader, PdfWriter
 from generate_book import generate_book
 from generate_cover import generate_cover
 
@@ -51,8 +52,6 @@ IMAGES_LOCAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images"
 # ============================================================
 # VARIANT MAPPING — Short codes to internal folder names
 # ============================================================
-# Short codes (B1-B5, G1-G5) are used externally in Shopify, Make.com, URLs,
-# and all customer-facing contexts. Internal folder names are NEVER exposed.
 VARIANT_MAP = {
     "B1": "boy-fair-blonde",
     "B2": "boy-fair-red",
@@ -68,7 +67,6 @@ VARIANT_MAP = {
 
 VALID_SHORT_CODES = list(VARIANT_MAP.keys())
 
-# List of required image files per variant
 REQUIRED_IMAGES = ["cover.jpg"] + [f"scene-{i:02d}.jpg" for i in range(1, 13)]
 
 
@@ -76,7 +74,6 @@ REQUIRED_IMAGES = ["cover.jpg"] + [f"scene-{i:02d}.jpg" for i in range(1, 13)]
 # R2 CLIENT
 # ============================================================
 def get_r2_client():
-    """Create an S3-compatible client for Cloudflare R2."""
     return boto3.client(
         "s3",
         endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
@@ -87,10 +84,9 @@ def get_r2_client():
 
 
 # ============================================================
-# R2 UPLOAD (for generated PDFs)
+# R2 UPLOAD
 # ============================================================
 def upload_to_r2(local_path, filename):
-    """Upload a file to R2 and return the public URL."""
     client = get_r2_client()
     key = f"books/{filename}"
     client.upload_file(
@@ -104,15 +100,9 @@ def upload_to_r2(local_path, filename):
 # R2 DOWNLOAD (for illustration images)
 # ============================================================
 def download_variant_images(variant_folder):
-    """
-    Download all images for a variant from R2 to local filesystem.
-    Images are cached — if they already exist locally, skip download.
-    Returns the local variant directory path.
-    """
     variant_dir = os.path.join(IMAGES_LOCAL, variant_folder)
     os.makedirs(variant_dir, exist_ok=True)
 
-    # Check if all images already exist locally (cached from previous request)
     all_exist = all(
         os.path.exists(os.path.join(variant_dir, img))
         for img in REQUIRED_IMAGES
@@ -121,7 +111,6 @@ def download_variant_images(variant_folder):
         print(f"  Images for variant already cached locally")
         return variant_dir
 
-    # Download from R2
     print(f"  Downloading images from R2...")
     client = get_r2_client()
     downloaded = 0
@@ -144,7 +133,6 @@ def download_variant_images(variant_folder):
 
     print(f"  Downloaded {downloaded}/{len(REQUIRED_IMAGES)} images")
 
-    # Verify all required images are now present
     missing = [img for img in REQUIRED_IMAGES if not os.path.exists(os.path.join(variant_dir, img))]
     if missing:
         raise FileNotFoundError(f"Missing images after download: {len(missing)} file(s)")
@@ -153,10 +141,52 @@ def download_variant_images(variant_folder):
 
 
 # ============================================================
+# PDF MERGER — Combine cover + interior for Gelato
+# ============================================================
+def create_combined_pdf(cover_path, interior_path, output_path):
+    """
+    Merge cover wrap + interior into a single PDF for Gelato.
+
+    Gelato photobooks require ONE PDF structured as:
+      Page 1:     Cover wrap spread (front + spine + back)
+      Page 2:     Blank endpaper
+      Pages 3-32: 30 interior content pages
+      Page 33:    Blank endpaper
+
+    See: https://support.gelato.com/en/articles/8996282
+    """
+    writer = PdfWriter()
+
+    # Page 1: Cover wrap spread
+    cover_reader = PdfReader(cover_path)
+    writer.add_page(cover_reader.pages[0])
+
+    # Page 2: Blank endpaper (matching interior page dimensions)
+    interior_reader = PdfReader(interior_path)
+    page0 = interior_reader.pages[0]
+    iw = float(page0.mediabox.width)
+    ih = float(page0.mediabox.height)
+    writer.add_blank_page(width=iw, height=ih)
+
+    # Pages 3 to N+2: All interior pages
+    for page in interior_reader.pages:
+        writer.add_page(page)
+
+    # Last page: Blank endpaper
+    writer.add_blank_page(width=iw, height=ih)
+
+    with open(output_path, 'wb') as f:
+        writer.write(f)
+
+    total = len(writer.pages)
+    print(f"  Combined PDF: {total} pages ({output_path})")
+    return total
+
+
+# ============================================================
 # AUTH MIDDLEWARE
 # ============================================================
 def check_auth():
-    """Simple bearer token auth."""
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         return False
@@ -174,39 +204,37 @@ def health():
 @app.route("/generate", methods=["POST"])
 def generate():
     """
-    Generate a personalized book PDF and cover wrap PDF.
+    Generate a personalized book as a single combined PDF for Gelato.
 
     Expected JSON body:
     {
         "name": "Dominic",
-        "gifter": "Grandma & Grandpa",   (optional, default "")
-        "variant": "B1"                   (short code: B1-B5, G1-G5)
+        "gifter": "Grandma & Grandpa",
+        "variant": "B1"
     }
 
     Returns:
     {
         "status": "success",
+        "combined_url": "https://pub-xxxxx.r2.dev/books/abc123-combined.pdf",
         "pdf_url": "https://pub-xxxxx.r2.dev/books/abc123.pdf",
         "cover_url": "https://pub-xxxxx.r2.dev/books/abc123-cover.pdf",
         "name": "Dominic",
         "variant": "B1",
-        "pages": 30
+        "pages": 33
     }
     """
-    # Auth check
     if not check_auth():
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
-    # Parse request
     data = request.get_json()
     if not data:
         return jsonify({"status": "error", "message": "JSON body required"}), 400
 
     name    = data.get("name", "").strip()
     gifter  = data.get("gifter", "").strip()
-    variant = data.get("variant", "").strip().upper()  # Normalize to uppercase
+    variant = data.get("variant", "").strip().upper()
 
-    # Validate inputs
     if not name:
         return jsonify({"status": "error", "message": "name is required"}), 400
     if not variant:
@@ -219,24 +247,21 @@ def generate():
             "message": f"Invalid variant code. Must be one of: {VALID_SHORT_CODES}"
         }), 400
 
-    # Translate short code to internal folder name (server-side only)
     variant_folder = VARIANT_MAP[variant]
 
-    # Generate both PDFs
     try:
-        # Step 1: Download images from R2 (cached if already present)
+        # Step 1: Download images from R2
         download_variant_images(variant_folder)
 
-        # Step 2: Generate interior PDF
+        # Step 2: Generate interior PDF (30 pages)
         order_id = uuid.uuid4().hex[:12]
-        # Use short code in filenames — never expose internal folder names
         base_name = f"{name.lower().replace(' ', '-')}-{variant}-{order_id}"
 
         interior_filename = f"{base_name}.pdf"
         interior_path = os.path.join(tempfile.gettempdir(), interior_filename)
         generate_book(name, gifter, variant_folder, interior_path)
 
-        # Step 3: Generate cover wrap PDF
+        # Step 3: Generate cover wrap PDF (1 page)
         cover_filename = f"{base_name}-cover.pdf"
         cover_path = os.path.join(tempfile.gettempdir(), cover_filename)
         generate_cover(
@@ -246,25 +271,35 @@ def generate():
             page_count=30
         )
 
-        # Step 4: Upload both PDFs to R2
+        # Step 4: Merge into single combined PDF for Gelato
+        #   Page 1:     Cover wrap spread
+        #   Page 2:     Blank endpaper
+        #   Pages 3-32: Interior pages
+        #   Page 33:    Blank endpaper
+        combined_filename = f"{base_name}-combined.pdf"
+        combined_path = os.path.join(tempfile.gettempdir(), combined_filename)
+        total_pages = create_combined_pdf(cover_path, interior_path, combined_path)
+
+        # Step 5: Upload all PDFs to R2
+        combined_url = upload_to_r2(combined_path, combined_filename)
         pdf_url = upload_to_r2(interior_path, interior_filename)
         cover_url = upload_to_r2(cover_path, cover_filename)
 
-        # Clean up temp PDF files
-        for path in [interior_path, cover_path]:
+        # Clean up temp files
+        for path in [interior_path, cover_path, combined_path]:
             try:
                 os.remove(path)
             except OSError:
                 pass
 
-        # Return short code in response — never internal folder name
         return jsonify({
             "status": "success",
+            "combined_url": combined_url,
             "pdf_url": pdf_url,
             "cover_url": cover_url,
             "name": name,
             "variant": variant,
-            "pages": 30,
+            "pages": total_pages,
         })
 
     except FileNotFoundError as e:
