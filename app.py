@@ -67,6 +67,10 @@ VARIANT_MAP = {
 
 VALID_SHORT_CODES = list(VARIANT_MAP.keys())
 
+# Reverse mapping — internal folder names to short codes
+# Allows the API to accept either "G1" or "girl-fair-blonde" as valid variant input
+REVERSE_VARIANT_MAP = {v: k for k, v in VARIANT_MAP.items()}
+
 REQUIRED_IMAGES = ["cover.jpg"] + [f"scene-{i:02d}.jpg" for i in range(1, 13)]
 
 
@@ -233,21 +237,28 @@ def generate():
 
     name    = data.get("name", "").strip()
     gifter  = data.get("gifter", "").strip()
-    variant = data.get("variant", "").strip().upper()
+    variant_raw = data.get("variant", "").strip()
+    variant = variant_raw.upper()  # Try as short code first (B1, G1, etc.)
 
     if not name:
         return jsonify({"status": "error", "message": "name is required"}), 400
-    if not variant:
+    if not variant_raw:
         return jsonify({"status": "error", "message": "variant is required"}), 400
     if len(name) > 20:
         return jsonify({"status": "error", "message": "name must be 20 characters or less"}), 400
-    if variant not in VARIANT_MAP:
+    # Accept either short codes (B1, G1) or internal folder names (boy-fair-blonde, girl-fair-blonde)
+    if variant in VARIANT_MAP:
+        # Short code provided (e.g. "G1")
+        variant_folder = VARIANT_MAP[variant]
+    elif variant_raw.lower() in REVERSE_VARIANT_MAP:
+        # Internal folder name provided (e.g. "girl-fair-blonde")
+        variant = REVERSE_VARIANT_MAP[variant_raw.lower()]
+        variant_folder = variant_raw.lower()
+    else:
         return jsonify({
             "status": "error",
-            "message": f"Invalid variant code. Must be one of: {VALID_SHORT_CODES}"
+            "message": f"Invalid variant. Must be a short code ({VALID_SHORT_CODES}) or folder name."
         }), 400
-
-    variant_folder = VARIANT_MAP[variant]
 
     try:
         # Step 1: Download images from R2
