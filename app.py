@@ -68,7 +68,6 @@ VARIANT_MAP = {
 VALID_SHORT_CODES = list(VARIANT_MAP.keys())
 
 # Reverse mapping — internal folder names to short codes
-# Allows the API to accept either "G1" or "girl-fair-blonde" as valid variant input
 REVERSE_VARIANT_MAP = {v: k for k, v in VARIANT_MAP.items()}
 
 REQUIRED_IMAGES = ["cover.jpg"] + [f"scene-{i:02d}.jpg" for i in range(1, 13)]
@@ -145,38 +144,69 @@ def download_variant_images(variant_folder):
 
 
 # ============================================================
-# PDF MERGER — Combine cover + interior for Gelato
+# PDF: Add blank endpapers to interior for Gelato
+# ============================================================
+def create_interior_with_endpapers(interior_path, output_path):
+    """
+    Add blank endpapers to the interior PDF for Gelato compatibility.
+
+    Gelato photobooks require the interior file ("default" type) to have:
+      Page 1:      Blank endpaper
+      Pages 2-31:  30 interior content pages
+      Page 32:     Blank endpaper
+
+    The cover wrap is uploaded separately as a 1-page "cover" type file.
+    Together: 1 (cover) + 32 (interior w/ endpapers) = 33 total pages.
+    """
+    reader = PdfReader(interior_path)
+    writer = PdfWriter()
+
+    # Get dimensions from first interior page (210x280mm at 72 DPI)
+    page0 = reader.pages[0]
+    pw = float(page0.mediabox.width)
+    ph = float(page0.mediabox.height)
+
+    # Page 1: Blank endpaper
+    writer.add_blank_page(width=pw, height=ph)
+
+    # Pages 2-31: All 30 interior content pages
+    for page in reader.pages:
+        writer.add_page(page)
+
+    # Page 32: Blank endpaper
+    writer.add_blank_page(width=pw, height=ph)
+
+    with open(output_path, 'wb') as f:
+        writer.write(f)
+
+    total = len(writer.pages)
+    print(f"  Interior with endpapers: {total} pages ({output_path})")
+    return total
+
+
+# ============================================================
+# PDF MERGER — Combine cover + interior (legacy/reference)
 # ============================================================
 def create_combined_pdf(cover_path, interior_path, output_path):
     """
-    Merge cover wrap + interior into a single PDF for Gelato.
-
-    Gelato photobooks require ONE PDF structured as:
-      Page 1:     Cover wrap spread (front + spine + back)
-      Page 2:     Blank endpaper
-      Pages 3-32: 30 interior content pages
-      Page 33:    Blank endpaper
-
-    See: https://support.gelato.com/en/articles/8996282
+    Merge cover wrap + interior into a single combined PDF.
+    Page 1: Cover wrap spread, Page 2: Blank endpaper,
+    Pages 3-32: 30 interior pages, Page 33: Blank endpaper.
     """
     writer = PdfWriter()
 
-    # Page 1: Cover wrap spread
     cover_reader = PdfReader(cover_path)
     writer.add_page(cover_reader.pages[0])
 
-    # Page 2: Blank endpaper (matching interior page dimensions)
     interior_reader = PdfReader(interior_path)
     page0 = interior_reader.pages[0]
     iw = float(page0.mediabox.width)
     ih = float(page0.mediabox.height)
     writer.add_blank_page(width=iw, height=ih)
 
-    # Pages 3 to N+2: All interior pages
     for page in interior_reader.pages:
         writer.add_page(page)
 
-    # Last page: Blank endpaper
     writer.add_blank_page(width=iw, height=ih)
 
     with open(output_path, 'wb') as f:
@@ -208,7 +238,7 @@ def health():
 @app.route("/generate", methods=["POST"])
 def generate():
     """
-    Generate a personalized book as a single combined PDF for Gelato.
+    Generate a personalized book as separate PDFs for Gelato.
 
     Expected JSON body:
     {
@@ -220,9 +250,9 @@ def generate():
     Returns:
     {
         "status": "success",
-        "combined_url": "https://pub-xxxxx.r2.dev/books/abc123-combined.pdf",
-        "pdf_url": "https://pub-xxxxx.r2.dev/books/abc123.pdf",
-        "cover_url": "https://pub-xxxxx.r2.dev/books/abc123-cover.pdf",
+        "pdf_url": "https://.../<name>-<variant>-<id>.pdf",
+        "cover_url": "https://.../<name>-<variant>-<id>-cover.pdf",
+        "combined_url": "https://.../<name>-<variant>-<id>-combined.pdf",
         "name": "Dominic",
         "variant": "B1",
         "pages": 33
@@ -238,7 +268,7 @@ def generate():
     name    = data.get("name", "").strip()
     gifter  = data.get("gifter", "").strip()
     variant_raw = data.get("variant", "").strip()
-    variant = variant_raw.upper()  # Try as short code first (B1, G1, etc.)
+    variant = variant_raw.upper()
 
     if not name:
         return jsonify({"status": "error", "message": "name is required"}), 400
@@ -246,12 +276,11 @@ def generate():
         return jsonify({"status": "error", "message": "variant is required"}), 400
     if len(name) > 20:
         return jsonify({"status": "error", "message": "name must be 20 characters or less"}), 400
-    # Accept either short codes (B1, G1) or internal folder names (boy-fair-blonde, girl-fair-blonde)
+
+    # Accept either short codes (B1, G1) or internal folder names
     if variant in VARIANT_MAP:
-        # Short code provided (e.g. "G1")
         variant_folder = VARIANT_MAP[variant]
     elif variant_raw.lower() in REVERSE_VARIANT_MAP:
-        # Internal folder name provided (e.g. "girl-fair-blonde")
         variant = REVERSE_VARIANT_MAP[variant_raw.lower()]
         variant_folder = variant_raw.lower()
     else:
@@ -264,13 +293,13 @@ def generate():
         # Step 1: Download images from R2
         download_variant_images(variant_folder)
 
-        # Step 2: Generate interior PDF (30 pages)
+        # Step 2: Generate raw interior PDF (30 content pages)
         order_id = uuid.uuid4().hex[:12]
         base_name = f"{name.lower().replace(' ', '-')}-{variant}-{order_id}"
 
-        interior_filename = f"{base_name}.pdf"
-        interior_path = os.path.join(tempfile.gettempdir(), interior_filename)
-        generate_book(name, gifter, variant_folder, interior_path)
+        interior_raw_filename = f"{base_name}-interior-raw.pdf"
+        interior_raw_path = os.path.join(tempfile.gettempdir(), interior_raw_filename)
+        generate_book(name, gifter, variant_folder, interior_raw_path)
 
         # Step 3: Generate cover wrap PDF (1 page)
         cover_filename = f"{base_name}-cover.pdf"
@@ -282,22 +311,27 @@ def generate():
             page_count=30
         )
 
-        # Step 4: Merge into single combined PDF for Gelato
-        #   Page 1:     Cover wrap spread
-        #   Page 2:     Blank endpaper
-        #   Pages 3-32: Interior pages
-        #   Page 33:    Blank endpaper
+        # Step 4: Create interior PDF WITH blank endpapers (32 pages)
+        #   Page 1:      Blank endpaper
+        #   Pages 2-31:  30 content pages
+        #   Page 32:     Blank endpaper
+        endpaper_filename = f"{base_name}.pdf"
+        endpaper_path = os.path.join(tempfile.gettempdir(), endpaper_filename)
+        endpaper_pages = create_interior_with_endpapers(interior_raw_path, endpaper_path)
+
+        # Step 5: Create combined PDF (33 pages total)
         combined_filename = f"{base_name}-combined.pdf"
         combined_path = os.path.join(tempfile.gettempdir(), combined_filename)
-        total_pages = create_combined_pdf(cover_path, interior_path, combined_path)
+        total_pages = create_combined_pdf(cover_path, interior_raw_path, combined_path)
 
-        # Step 5: Upload all PDFs to R2
-        combined_url = upload_to_r2(combined_path, combined_filename)
-        pdf_url = upload_to_r2(interior_path, interior_filename)
+        # Step 6: Upload PDFs to R2
+        # pdf_url = interior WITH endpapers (32 pages) — sent to Gelato as "default"
+        pdf_url = upload_to_r2(endpaper_path, endpaper_filename)
         cover_url = upload_to_r2(cover_path, cover_filename)
+        combined_url = upload_to_r2(combined_path, combined_filename)
 
         # Clean up temp files
-        for path in [interior_path, cover_path, combined_path]:
+        for path in [interior_raw_path, cover_path, endpaper_path, combined_path]:
             try:
                 os.remove(path)
             except OSError:
