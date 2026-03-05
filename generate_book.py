@@ -200,33 +200,41 @@ def pg_text(c, paragraphs):
 
 
 def pg_finale(c, data, img_path):
-    """The big emotional payoff — spread 12 finale text, centered and special."""
+    """The big emotional payoff — spread 12 finale text, centered and special.
+    Uses tighter spacing than normal text pages to fit the longer finale content."""
     pg_blank(c)
-    y = PAGE_H - MT
+    # Tighter layout for the finale — more text needs to fit on this page
+    fin_size = 13
+    fin_leading = fin_size * 1.6
+    fin_para_space = fin_leading * 0.35
+    fin_mt = 1.1 * inch
+    fin_mb = 0.8 * inch
+
+    y = PAGE_H - fin_mt
     c.setFillColor(DARK_BROWN)
     for para in data:
         if not para.strip():
-            y -= BODY_LEADING
+            y -= fin_leading
             continue
         # Handle multi-line paragraphs (for the Jesus quote)
         sub_lines = para.split("\n")
         for sub in sub_lines:
             if not sub.strip():
-                y -= BODY_LEADING * 0.5
+                y -= fin_leading * 0.5
                 continue
             is_q = sub.lstrip().startswith("\u201c") or sub.lstrip().startswith('"')
             font = F_IT if is_q else F_REG
-            c.setFont(font, BODY_SIZE)
-            for line in wrap(c, sub, font, BODY_SIZE, TW):
-                if y < MB:
+            c.setFont(font, fin_size)
+            for line in wrap(c, sub, font, fin_size, TW):
+                if y < fin_mb:
                     break
                 c.drawString(ML, y, line)
-                y -= BODY_LEADING
-        y -= PARA_SPACE
+                y -= fin_leading
+        y -= fin_para_space
     # Gold divider
     c.setFillColor(GOLD)
     c.setFont(F_REG, 18)
-    c.drawCentredString(PAGE_W / 2, MB - 0.15 * inch, "\u2726")
+    c.drawCentredString(PAGE_W / 2, fin_mb - 0.15 * inch, "\u2726")
 
 
 def pg_promo(c, lines):
