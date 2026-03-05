@@ -1,22 +1,22 @@
 """
-The Named Story — Flask API Server
+The Named Story â Flask API Server
 ====================================
 Wraps generate_book.py and generate_cover.py as a web API that Make.com can call.
 
 Endpoints:
-    POST /generate  — Generate a personalized book PDF + cover wrap PDF
-    GET  /health    — Health check
+    POST /generate  â Generate a personalized book PDF + cover wrap PDF
+    GET  /health    â Health check
 
 Environment Variables:
-    CLOUDFLARE_ACCOUNT_ID  — Your Cloudflare account ID
-    CLOUDFLARE_ACCESS_KEY  — R2 access key ID
-    CLOUDFLARE_SECRET_KEY  — R2 secret access key
-    R2_BUCKET_NAME         — Your R2 bucket name (e.g. 'named-story-pdfs')
-    R2_PUBLIC_URL          — Public URL for your R2 bucket (e.g. 'https://pub-xxxxx.r2.dev')
-    FONTS_DIR              — Path to fonts directory (default: ./fonts)
-    API_SECRET             — Simple auth token to protect your endpoint
-    GELATO_API_KEY         — (Optional) Gelato API key for fetching exact cover dimensions
-    GELATO_PRODUCT_UID     — (Optional) Gelato product UID for cover dimensions
+    CLOUDFLARE_ACCOUNT_ID  â Your Cloudflare account ID
+    CLOUDFLARE_ACCESS_KEY  â R2 access key ID
+    CLOUDFLARE_SECRET_KEY  â R2 secret access key
+    R2_BUCKET_NAME         â Your R2 bucket name (e.g. 'named-story-pdfs')
+    R2_PUBLIC_URL          â Public URL for your R2 bucket (e.g. 'https://pub-xxxxx.r2.dev')
+    FONTS_DIR              â Path to fonts directory (default: ./fonts)
+    API_SECRET             â Simple auth token to protect your endpoint
+    GELATO_API_KEY         â (Optional) Gelato API key for fetching exact cover dimensions
+    GELATO_PRODUCT_UID     â (Optional) Gelato product UID for cover dimensions
 """
 
 import os
@@ -50,7 +50,7 @@ GELATO_PRODUCT  = os.environ.get("GELATO_PRODUCT_UID",
 IMAGES_LOCAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
 
 # ============================================================
-# VARIANT MAPPING — Short codes to internal folder names
+# VARIANT MAPPING â Short codes to internal folder names
 # ============================================================
 VARIANT_MAP = {
     "B1": "boy-fair-blonde",
@@ -67,7 +67,7 @@ VARIANT_MAP = {
 
 VALID_SHORT_CODES = list(VARIANT_MAP.keys())
 
-# Reverse mapping — internal folder names to short codes
+# Reverse mapping â internal folder names to short codes
 REVERSE_VARIANT_MAP = {v: k for k, v in VARIANT_MAP.items()}
 
 REQUIRED_IMAGES = ["cover.jpg"] + [f"scene-{i:02d}.jpg" for i in range(1, 13)]
@@ -185,13 +185,15 @@ def create_interior_with_endpapers(interior_path, output_path):
 
 
 # ============================================================
-# PDF MERGER — Combine cover + interior (legacy/reference)
+# PDF MERGER â Combine cover + interior (legacy/reference)
 # ============================================================
 def create_combined_pdf(cover_path, interior_path, output_path):
     """
     Merge cover wrap + interior into a single combined PDF.
-    Page 1: Cover wrap spread, Page 2: Blank endpaper,
-    Pages 3-32: 30 interior pages, Page 33: Blank endpaper.
+    Page 1: Cover wrap spread (618x256mm),
+    Pages 2-31: 30 interior content pages (210x280mm).
+    Total: 31 pages in file, pageCount=30 in Gelato API.
+    Gelato adds its own endpapers for hardcover books automatically.
     """
     writer = PdfWriter()
 
@@ -199,15 +201,8 @@ def create_combined_pdf(cover_path, interior_path, output_path):
     writer.add_page(cover_reader.pages[0])
 
     interior_reader = PdfReader(interior_path)
-    page0 = interior_reader.pages[0]
-    iw = float(page0.mediabox.width)
-    ih = float(page0.mediabox.height)
-    writer.add_blank_page(width=iw, height=ih)
-
     for page in interior_reader.pages:
         writer.add_page(page)
-
-    writer.add_blank_page(width=iw, height=ih)
 
     with open(output_path, 'wb') as f:
         writer.write(f)
@@ -325,7 +320,7 @@ def generate():
         total_pages = create_combined_pdf(cover_path, interior_raw_path, combined_path)
 
         # Step 6: Upload PDFs to R2
-        # pdf_url = interior WITH endpapers (32 pages) — sent to Gelato as "default"
+        # pdf_url = interior WITH endpapers (32 pages) â sent to Gelato as "default"
         pdf_url = upload_to_r2(endpaper_path, endpaper_filename)
         cover_url = upload_to_r2(cover_path, cover_filename)
         combined_url = upload_to_r2(combined_path, combined_filename)
