@@ -30,8 +30,9 @@ app = Flask(__name__)
 # ============================================================
 # CONFIGURATION
 # ============================================================
-API_SECRET = os.environ.get("API_SECRET", "change-me-before-deploy")
-
+API_SECRET = os.environ.get("API_SECRET", "").strip()
+if not API_SECRET:
+    raise RuntimeError("API_SECRET must be set before starting the service")
 R2_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
 R2_ACCESS_KEY = os.environ.get("CLOUDFLARE_ACCESS_KEY", "")
 R2_SECRET_KEY = os.environ.get("CLOUDFLARE_SECRET_KEY", "")
